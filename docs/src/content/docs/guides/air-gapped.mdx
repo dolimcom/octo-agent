@@ -146,12 +146,24 @@ online — see [Self-host octo serve](/docs/guides/self-host/).
 
 ### Context windows and auto-compaction
 
-octo resolves a model's context window by **substring-matching its name**, and uses that to decide
-when to auto-compact history (at 75% of the window by default). An internal model's name usually
-matches no entry, in which case octo treats it as **128k**.
+octo uses the context window to decide when to auto-compact history (at 75% of the window by
+default). Set the limit on each self-hosted model entry so it matches what that deployment actually
+accepts, even when its model id also matches a larger model in octo's built-in table:
 
-That is an assumption, unrelated to what your server will actually accept. Tell it the real number
-instead:
+```yaml
+endpoints:
+  - id: intranet
+    provider: custom
+    protocol: openai
+    base_url: http://10.0.0.20:8000/v1
+    models:
+      - model: Qwen3-32B
+        context_window: 32000
+```
+
+Values below 1000 are rejected with a note about the units — `32k` is `32000`, not `32`.
+
+For unrecognized models without a per-model value, you can set the global fallback instead:
 
 ```yaml
 fallback_context_window: 32000      # tokens — 32k is 32000, not 32
@@ -164,14 +176,10 @@ octo --fallback-context-window 32000
 OCTO_FALLBACK_CONTEXT_WINDOW=32000 octo serve -d
 ```
 
-Values below 1000 are rejected with a note about the units — that is almost always 32k written as
-`32`, and honoring it literally would put the compaction trigger below a single message.
-
-**It applies to the fallback only.** A model whose name does match a built-in entry keeps the
-table's window, so setting this can never mask a known model's real size. The trade-off is that the
-table records a model's *published* ceiling, which need not be what your deployment was started
-with; when those disagree, lower the trigger globally with `compact_auto_pct` (a percentage of the
-context window, default 75).
+Resolution order is: the selected model entry's `context_window`, the built-in model table,
+`fallback_context_window`, then the built-in 128k default. The per-model setting is therefore the
+right choice when a known model is served with a smaller limit. Since it belongs to the endpoint's
+model entry, the same model id can safely have different limits on two endpoints.
 
 <Aside type="note" title="Getting it wrong is not a hard failure">
 If a turn does overflow, octo recognizes the endpoint's context-overflow error, compacts history

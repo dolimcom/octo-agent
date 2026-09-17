@@ -499,6 +499,23 @@ func TestEntryByModel_BareModelAmbiguousPicksDefault(t *testing.T) {
 	}
 }
 
+func TestEntryByModel_BareModelAmbiguousWithoutDefaultWarns(t *testing.T) {
+	logBuf := captureSlog(t)
+	cfg := Config{Endpoints: []Endpoint{
+		{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		{ID: "relay-b", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+	}}
+
+	got, ok := cfg.EntryByModel("claude-sonnet-4-6")
+	if !ok || got.Provider != "custom" {
+		t.Fatalf("EntryByModel(bare) = (%+v, %v), want the first configured entry", got, ok)
+	}
+	if !strings.Contains(logBuf.String(), "model reference matches multiple endpoints") ||
+		!strings.Contains(logBuf.String(), "relay-a") {
+		t.Errorf("expected ambiguity warning naming relay-a, got:\n%s", logBuf.String())
+	}
+}
+
 func TestModelVision(t *testing.T) {
 	c := Config{Endpoints: []Endpoint{
 		{ID: "ep-a", Provider: "custom", Models: []EndpointModel{

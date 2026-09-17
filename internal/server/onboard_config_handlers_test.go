@@ -787,6 +787,59 @@ func TestCreateEndpoint_DocumentedModelsShape(t *testing.T) {
 	}
 }
 
+func TestEndpointModelContextWindowAPI(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	body := `{
+		"id": "intranet",
+		"provider": "custom",
+		"base_url": "http://localhost:8000/v1",
+		"protocol": "openai",
+		"models": [{"model": "Qwen3-32B", "context_window": 32000, "vision": false}]
+	}`
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints", body)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST /api/config/endpoints = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+	var created endpointJSONOut
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if len(created.Models) != 1 || created.Models[0].ContextWindow != 32_000 {
+		t.Fatalf("create response models = %+v, want context_window 32000", created.Models)
+	}
+
+	listed := getEndpointsResponse(t, srv)
+	if len(listed.Endpoints) != 1 || len(listed.Endpoints[0].Models) != 1 || listed.Endpoints[0].Models[0].ContextWindow != 32_000 {
+		t.Fatalf("GET endpoints = %+v, want context_window 32000", listed.Endpoints)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := cfg.EntryByModel("intranet::Qwen3-32B")
+	if !ok || entry.ContextWindow != 32_000 {
+		t.Fatalf("saved entry = (%v, %+v), want context_window 32000", ok, entry)
+	}
+}
+
+func TestEndpointModelContextWindowAPIRejectsUnitMistake(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints", `{"id":"intranet","provider":"custom","models":[{"model":"Qwen3-32B","context_window":32}]}`)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "at least 1000") {
+		t.Fatalf("create with context_window 32 = %d %q, want 400 with floor", w.Code, w.Body.String())
+	}
+
+	seedModels(t, config.Config{Endpoints: []config.Endpoint{{ID: "intranet", Provider: "custom", Models: []config.EndpointModel{{Model: "existing"}}}}})
+	w = doJSON(t, srv, http.MethodPost, "/api/config/endpoints/intranet/models", `{"model":"Qwen3-32B","context_window":32}`)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "at least 1000") {
+		t.Fatalf("add model with context_window 32 = %d %q, want 400 with floor", w.Code, w.Body.String())
+	}
+}
+
 // TestCreateEndpoint_HeadersPersisted covers a create request that includes a
 // headers object — it must be persisted onto the new config.Endpoint and
 // echoed back both in the create response and a subsequent GET.

@@ -333,7 +333,7 @@ func (a *Agent) compactTriggerTokens() int {
 		if frac > 1 {
 			frac = 1
 		}
-		return int(float64(contextWindow(a.Model)) * frac)
+		return int(float64(a.ContextWindow()) * frac)
 	default:
 		return a.CompactThreshold
 	}
@@ -613,12 +613,12 @@ func (a *Agent) summarize(ctx context.Context, msgs []Message, handler EventHand
 	// context only grows. Undescribed blocks pass through as before.
 	msgs = textifyDescribedImages(msgs)
 	if a.LiteSender != nil && a.LiteModel != "" {
-		summary, err := a.summarizeOn(ctx, a.LiteSender, a.LiteModel, msgs, handler)
+		summary, err := a.summarizeOn(ctx, a.LiteSender, a.LiteModel, a.LiteContextWindow(), msgs, handler)
 		if err == nil {
 			return summary, nil
 		}
 	}
-	return a.summarizeOn(ctx, a.GetSender(), a.Model, msgs, handler)
+	return a.summarizeOn(ctx, a.GetSender(), a.Model, a.ContextWindow(), msgs, handler)
 }
 
 // summarizeOn runs one summarisation call on the given sender/model pair.
@@ -634,13 +634,15 @@ func (a *Agent) summarize(ctx context.Context, msgs []Message, handler EventHand
 // When the sender implements StreamingSender and a handler is attached, the
 // summary is streamed so the caller can surface EventCompactProgress as it
 // arrives; otherwise it falls back to the buffered SendMessages.
-func (a *Agent) summarizeOn(ctx context.Context, sender Sender, model string, msgs []Message, handler EventHandler) (string, error) {
+func (a *Agent) summarizeOn(ctx context.Context, sender Sender, model string, window int, msgs []Message, handler EventHandler) (string, error) {
 	// ── Overflow protection ──────────────────────────────────────────────
 	// If msgs alone exceeds the window, pop from head until it fits.
 	// This handles the case where the history is already over the limit
 	// (e.g. a single huge tool_result tipped it over). The window is the
 	// summarising model's — the lite model may be smaller than the primary.
-	window := contextWindow(model)
+	if window <= 0 {
+		window = contextWindow(model)
+	}
 	for {
 		// Measure THIS slice, not the whole live history. historyTokens returns
 		// the provider-reported lastInputTokens (full prior prompt) whenever it
@@ -713,7 +715,7 @@ func (a *Agent) compactKeepBudget() int {
 	if frac > 1 {
 		frac = 1
 	}
-	budget := int(float64(contextWindow(a.Model)) * frac)
+	budget := int(float64(a.ContextWindow()) * frac)
 	if trig := a.compactTriggerTokens(); trig > 0 && budget > trig/2 {
 		budget = trig / 2
 	}

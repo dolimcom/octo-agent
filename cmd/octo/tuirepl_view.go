@@ -1290,7 +1290,7 @@ func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 	// which also set Agent.Model from the resolved entry. SetModel (not a
 	// bare write): the vision describer reads Model from the turn goroutine
 	// under the same lock.
-	m.a.SetModel(entry.Model)
+	m.a.SetModelConfig(entry.Model, entry.EffectiveContextWindow())
 	m.cfg.modelName = entry.Model
 	// Persist the switch on the session so a later `octo -c` resume honors it —
 	// the session file otherwise keeps the model it was created with (SyncFrom
@@ -1311,7 +1311,7 @@ func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 	}
 	// Tool surface may differ per model (e.g. vision vs non-vision).
 	if m.cfg.tools != nil {
-		m.cfg.tools = tools.DefaultToolsFor(entry.Model)
+		m.cfg.tools = tools.DefaultToolsFor(entry.Model, m.a.ContextWindow())
 	}
 
 	if setDefault {

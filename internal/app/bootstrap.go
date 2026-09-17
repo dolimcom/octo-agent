@@ -68,7 +68,9 @@ func RefreshMemoryBackend() {
 // MCP connection strategy — those legitimately differ per entry point.
 func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 	executor := tools.NewDefaultRegistry()
-	toolsFor := func(ctx context.Context) []agent.ToolDefinition { return tools.DefaultToolsForCtx(ctx, a.Model) }
+	toolsFor := func(ctx context.Context) []agent.ToolDefinition {
+		return tools.DefaultToolsForCtx(ctx, a.Model, a.ContextWindow())
+	}
 
 	spawner := NewSpawner(a, executor, toolsFor)
 	tools.SetSpawner(spawner)

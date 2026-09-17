@@ -73,14 +73,19 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 	// explicit "lite" override (call parameter or frontmatter `model: lite`)
 	// opts the child onto the parent's lite sender/model.
 	sender, model := s.parent.GetSender(), req.Model
+	contextWindow := 0
 	if strings.EqualFold(model, "lite") {
 		model = "" // no lite configured: inherit the parent's model
 		if s.parent.LiteSender != nil && s.parent.LiteModel != "" {
 			sender, model = s.parent.LiteSender, s.parent.LiteModel
+			contextWindow = s.parent.LiteContextWindow()
 		}
 	}
 	if model == "" {
 		model = s.parent.Model
+	}
+	if contextWindow == 0 {
+		contextWindow = s.parent.ContextWindowFor(model)
 	}
 
 	// Lean presets are seeded with the lean system prompt (skills + memory
@@ -91,6 +96,7 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 	}
 
 	child := agent.New(sender, model)
+	child.SetModelConfig(model, contextWindow)
 	child.System = baseSystem
 	// Preset agents append a persona after the shared identity, so the child
 	// keeps the harness context but takes on its specialized role. A schema
@@ -106,8 +112,7 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 	child.Gate = s.parent.Gate
 	child.MaxTurns = childMaxTurns
 	// Children compact on the same lite model as the parent.
-	child.LiteSender = s.parent.LiteSender
-	child.LiteModel = s.parent.LiteModel
+	child.SetLiteModel(s.parent.LiteSender, s.parent.LiteModel, s.parent.LiteContextWindow())
 
 	// A child gets its own describer rather than the parent's: the two may run
 	// different models, and the describer decides whether to translate images

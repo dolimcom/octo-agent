@@ -947,7 +947,7 @@ func TestSummarizeOn_OverflowMeasuresSlice(t *testing.T) {
 		NewUserMessage("c"), NewAssistantMessage("d"),
 		NewUserMessage("e"), NewAssistantMessage("f"),
 	}
-	if _, err := a.summarizeOn(context.Background(), lite, "lite-model", msgs, nil); err != nil {
+	if _, err := a.summarizeOn(context.Background(), lite, "lite-model", contextWindow("lite-model"), msgs, nil); err != nil {
 		t.Fatal(err)
 	}
 	// summarizeOn appends one compression prompt, so a slice that fits yields

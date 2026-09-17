@@ -147,12 +147,15 @@ type Reply struct {
 // Agent owns one conversation: the system prompt, the history of turns, the
 // model name, and the LLM transport (Sender).
 type Agent struct {
-	mu        sync.RWMutex // protects Sender (written by TUI event loop, read by turn goroutine)
-	Sender    Sender
-	System    string
-	Model     string
-	MaxTokens int
-	History   *History
+	mu     sync.RWMutex // protects Sender (written by TUI event loop, read by turn goroutine)
+	Sender Sender
+	System string
+	Model  string
+	// modelContextWindow is the selected endpoint model's deployed limit.
+	// Zero preserves the built-in lookup for callers without endpoint binding.
+	modelContextWindow int
+	MaxTokens          int
+	History            *History
 
 	// LeanSystem, when set, is a lighter variant of System (skills manifest and
 	// memory dropped) used to seed cheap read-only sub-agents. Empty falls back
@@ -167,6 +170,9 @@ type Agent struct {
 	// error to GenerateTitleOrSnippet's snippet fallback (no retry).
 	LiteSender Sender
 	LiteModel  string
+	// liteContextWindow stays separate because the same model name can be
+	// deployed with a different limit on the endpoint used for summarization.
+	liteContextWindow int
 
 	// Describer, when non-nil, renders images as text for a primary model that
 	// can't accept image input. The pre-send transform consults it every turn
@@ -643,6 +649,63 @@ func (a *Agent) SetModel(model string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.Model = model
+	a.modelContextWindow = 0
+}
+
+// SetModelConfig atomically installs a model and its endpoint-resolved context
+// window. A zero window intentionally falls back to the built-in model table.
+func (a *Agent) SetModelConfig(model string, contextWindow int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Model = model
+	a.modelContextWindow = contextWindow
+}
+
+// SetLiteModel installs the optional summarization sender together with its
+// own deployment window, which may differ from the primary model's window.
+func (a *Agent) SetLiteModel(sender Sender, model string, contextWindow int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.LiteSender = sender
+	a.LiteModel = model
+	a.liteContextWindow = contextWindow
+}
+
+// ContextWindow returns the primary model's configured deployment limit when
+// present, otherwise the built-in/fallback limit for its bare model name.
+func (a *Agent) ContextWindow() int {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.modelContextWindow > 0 {
+		return a.modelContextWindow
+	}
+	return contextWindow(a.Model)
+}
+
+// LiteContextWindow resolves the summarizer's limit independently from the
+// primary model so compaction does not size a lite request against the wrong
+// endpoint deployment.
+func (a *Agent) LiteContextWindow() int {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.liteContextWindow > 0 {
+		return a.liteContextWindow
+	}
+	return contextWindow(a.LiteModel)
+}
+
+// ContextWindowFor returns an instance-specific window for the primary or lite
+// model, falling back to the bare-model lookup for every other model.
+func (a *Agent) ContextWindowFor(model string) int {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if model == a.Model && a.modelContextWindow > 0 {
+		return a.modelContextWindow
+	}
+	if model == a.LiteModel && a.liteContextWindow > 0 {
+		return a.liteContextWindow
+	}
+	return contextWindow(model)
 }
 
 // SetImageDescriber installs (or clears, with nil) the image describer under a
@@ -2431,7 +2494,7 @@ func (a *Agent) ContextUsage() (used, window int) {
 	overhead := a.toolDefTokens
 	a.usageMu.Unlock()
 	if real > 0 {
-		return real, contextWindow(a.Model)
+		return real, a.ContextWindow()
 	}
 	// Only pay for the History snapshot + heuristic estimate when there's no
 	// real count yet (cold start) — this is called at TUI render-tick rate,
@@ -2445,10 +2508,10 @@ func (a *Agent) ContextUsage() (used, window int) {
 		// gauge at all — the system/tools overhead is real but reporting it
 		// here would put a misleading "ctx N%" on an empty transcript (the
 		// TUI status bar keys on used > 0).
-		return 0, contextWindow(a.Model)
+		return 0, a.ContextWindow()
 	}
 	est := estimateMessages(msgs) + estimateText(a.System) + overhead
-	return est, contextWindow(a.Model)
+	return est, a.ContextWindow()
 }
 
 // setToolDefOverhead stashes the estimated wire size of the tool schemas sent

@@ -985,6 +985,7 @@ export async function getConfig(): Promise<ConfigResponse> {
 // Read-only in PR4b; CRUD lands in PR5.
 export interface EndpointModel {
   model: string
+  context_window?: number
   vision: boolean
 }
 export interface EndpointConfig {
@@ -1019,6 +1020,7 @@ export async function getEndpoints(): Promise<EndpointsResponse> {
 
 export interface EndpointModelInput {
   model: string
+  context_window?: number
   vision: boolean
 }
 
@@ -1074,8 +1076,8 @@ export async function deleteEndpoint(id: string): Promise<void> {
   await request<unknown>(`/api/config/endpoints/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
-export async function addEndpointModel(id: string, model: string, vision: boolean): Promise<EndpointMutationResult> {
-  return request<EndpointMutationResult>(`/api/config/endpoints/${encodeURIComponent(id)}/models`, { method: 'POST', ...json({ model, vision }) })
+export async function addEndpointModel(id: string, model: string, vision: boolean, contextWindow?: number): Promise<EndpointMutationResult> {
+  return request<EndpointMutationResult>(`/api/config/endpoints/${encodeURIComponent(id)}/models`, { method: 'POST', ...json({ model, vision, context_window: contextWindow }) })
 }
 
 export async function deleteEndpointModel(id: string, model: string): Promise<void> {

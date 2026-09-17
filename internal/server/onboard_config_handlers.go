@@ -324,8 +324,9 @@ type endpointConfigJSON struct {
 
 // endpointModelJSON is one model under an endpoint.
 type endpointModelJSON struct {
-	Model  string `json:"model"`
-	Vision bool   `json:"vision"`
+	Model         string `json:"model"`
+	ContextWindow int    `json:"context_window,omitempty"`
+	Vision        bool   `json:"vision"`
 }
 
 // handleGetEndpoints serves the two-level endpoint view. Data comes straight
@@ -355,7 +356,7 @@ func (s *Server) handleGetEndpoints(w http.ResponseWriter, r *http.Request) {
 			Headers:   ep.Headers,
 		}
 		for _, m := range ep.Models {
-			em.Models = append(em.Models, endpointModelJSON{Model: m.Model, Vision: m.Vision})
+			em.Models = append(em.Models, endpointModelJSON{Model: m.Model, ContextWindow: m.ContextWindow, Vision: m.Vision})
 		}
 		out.Endpoints = append(out.Endpoints, em)
 	}
@@ -865,8 +866,9 @@ type createEndpointRequest struct {
 }
 
 type endpointModelIn struct {
-	Model  string `json:"model"`
-	Vision bool   `json:"vision"`
+	Model         string `json:"model"`
+	ContextWindow int    `json:"context_window,omitempty"`
+	Vision        bool   `json:"vision"`
 }
 
 type updateEndpointRequest struct {
@@ -906,7 +908,7 @@ func endpointToJSON(ep config.Endpoint) endpointJSONOut {
 		Headers:   ep.Headers,
 	}
 	for _, m := range ep.Models {
-		out.Models = append(out.Models, endpointModelJSON{Model: m.Model, Vision: m.Vision})
+		out.Models = append(out.Models, endpointModelJSON{Model: m.Model, ContextWindow: m.ContextWindow, Vision: m.Vision})
 	}
 	return out
 }
@@ -948,7 +950,10 @@ func (s *Server) handleCreateEndpoint(w http.ResponseWriter, r *http.Request) {
 			if m.Model == "" {
 				continue
 			}
-			ep.Models = append(ep.Models, config.EndpointModel{Model: m.Model, Vision: m.Vision})
+			if m.ContextWindow < 0 || m.ContextWindow > 0 && m.ContextWindow < config.MinFallbackContextWindow {
+				return fmt.Errorf("model %q context_window must be 0 or at least %d tokens", m.Model, config.MinFallbackContextWindow)
+			}
+			ep.Models = append(ep.Models, config.EndpointModel{Model: m.Model, ContextWindow: m.ContextWindow, Vision: m.Vision})
 		}
 		cfg.UpsertEndpoint(ep)
 		created = ep
@@ -1137,10 +1142,14 @@ func (s *Server) handleAddEndpointModel(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "model is required")
 		return
 	}
+	if req.ContextWindow < 0 || req.ContextWindow > 0 && req.ContextWindow < config.MinFallbackContextWindow {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("context_window must be 0 or at least %d tokens", config.MinFallbackContextWindow))
+		return
+	}
 
 	var updated config.Endpoint
 	if err := config.Mutate(func(cfg *config.Config) error {
-		if err := cfg.UpsertModel(id, config.EndpointModel{Model: req.Model, Vision: req.Vision}); err != nil {
+		if err := cfg.UpsertModel(id, config.EndpointModel{Model: req.Model, ContextWindow: req.ContextWindow, Vision: req.Vision}); err != nil {
 			return err
 		}
 		for _, ep := range cfg.Endpoints {

@@ -62,7 +62,7 @@ func NewSessionToolEnv(
 
 	mkSpawner := func() tools.Spawner {
 		return NewSpawner(a, executor, func(ctx context.Context) []agent.ToolDefinition {
-			return tools.DefaultToolsForCtx(ctx, a.Model)
+			return tools.DefaultToolsForCtx(ctx, a.Model, a.ContextWindow())
 		})
 	}
 	mgr := tools.SessionSubAgentManager(sessionID, mkSpawner)

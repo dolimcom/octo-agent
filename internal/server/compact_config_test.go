@@ -114,3 +114,60 @@ func TestBuildAgent_FallbackContextWindowFromEnv(t *testing.T) {
 		t.Errorf("FallbackContextWindow() = %d, want 24000 from the environment", got)
 	}
 }
+
+func TestBuildAgent_HonorsEndpointModelContextWindow(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "intranet-a", Provider: "custom", BaseURL: "http://a.example/v1", Protocol: "openai", Models: []config.EndpointModel{{Model: "claude-sonnet-5", ContextWindow: 32_000}}},
+			{ID: "intranet-b", Provider: "custom", BaseURL: "http://b.example/v1", Protocol: "openai", Models: []config.EndpointModel{{Model: "claude-sonnet-5", ContextWindow: 64_000}}},
+		},
+		Default: "intranet-a::claude-sonnet-5",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	aSession := agent.NewSession("claude-sonnet-5", "")
+	aSession.ModelConfig = "intranet-a::claude-sonnet-5"
+	bSession := agent.NewSession("claude-sonnet-5", "")
+	bSession.ModelConfig = "intranet-b::claude-sonnet-5"
+
+	if got := srv.buildAgent(aSession).ContextWindow(); got != 32_000 {
+		t.Errorf("intranet-a context window = %d, want 32000", got)
+	}
+	if got := srv.buildAgent(bSession).ContextWindow(); got != 64_000 {
+		t.Errorf("intranet-b context window = %d, want 64000", got)
+	}
+}
+
+func TestBuildAgent_EndpointModelContextWindowFloor(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{{ID: "intranet", Provider: "custom", BaseURL: "http://localhost:8000/v1", Protocol: "openai", Models: []config.EndpointModel{{Model: "claude-sonnet-5", ContextWindow: 32}}}},
+		Default:   "intranet::claude-sonnet-5",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	if got := srv.buildAgent(agent.NewSession("claude-sonnet-5", "")).ContextWindow(); got != 1_000_000 {
+		t.Errorf("invalid per-model context window reached serve path as %d, want built-in 1000000", got)
+	}
+}
+
+func TestContextWindowForSessionUsesCompositeBinding(t *testing.T) {
+	cfg := config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "intranet-a", Provider: "custom", Models: []config.EndpointModel{{Model: "claude-sonnet-5", ContextWindow: 32_000}}},
+			{ID: "intranet-b", Provider: "custom", Models: []config.EndpointModel{{Model: "claude-sonnet-5", ContextWindow: 64_000}}},
+		},
+		Default: "intranet-a::claude-sonnet-5",
+	}
+	for ref, want := range map[string]int{
+		"intranet-a::claude-sonnet-5": 32_000,
+		"intranet-b::claude-sonnet-5": 64_000,
+	} {
+		sess := agent.NewSession("claude-sonnet-5", "")
+		sess.ModelConfig = ref
+		if got := contextWindowForSession(cfg, sess); got != want {
+			t.Errorf("contextWindowForSession(%q) = %d, want %d", ref, got, want)
+		}
+	}
+}

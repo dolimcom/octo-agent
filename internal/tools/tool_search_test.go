@@ -125,6 +125,37 @@ func TestToolSearchActive_AutoThreshold(t *testing.T) {
 	}
 }
 
+func TestToolSearchUsesPerModelContextWindow(t *testing.T) {
+	resetToolSearchConfig(t)
+	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchAuto, ThresholdPct: 10})
+	catalog := []agent.ToolDefinition{{
+		Name:        "mcp__local__large_tool",
+		Description: strings.Repeat("x", 20_000),
+		Parameters:  map[string]any{"type": "object"},
+	}}
+	fakeCatalog(t, catalog)
+
+	if toolSearchActive("claude-sonnet-5", catalog) {
+		t.Fatal("built-in 1M window unexpectedly activated Tool Search")
+	}
+	if !toolSearchActive("claude-sonnet-5", catalog, 32_000) {
+		t.Fatal("configured 32k window did not activate Tool Search")
+	}
+	if got := MCPManifestFor("claude-sonnet-5", nil, 32_000); !strings.Contains(got, "mcp__local__large_tool") {
+		t.Fatalf("configured window did not reach MCP manifest: %q", got)
+	}
+	defs := DefaultToolsFor("claude-sonnet-5", 32_000)
+	seenBridge := false
+	seenRaw := false
+	for _, def := range defs {
+		seenBridge = seenBridge || def.Name == toolDescribeName
+		seenRaw = seenRaw || def.Name == "mcp__local__large_tool"
+	}
+	if !seenBridge || seenRaw {
+		t.Fatalf("configured window produced bridge=%v raw=%v, want bridge=true raw=false", seenBridge, seenRaw)
+	}
+}
+
 func TestDefaultToolsFor_BridgeReplacesCatalog(t *testing.T) {
 	resetToolSearchConfig(t)
 	fakeCatalog(t, sampleCatalog())

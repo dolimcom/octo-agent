@@ -157,7 +157,7 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 		// The persisted last-turn count below is far closer; the next round's
 		// usage broadcast corrects it.
 		if used := a.RealContextTokens(); used > 0 {
-			if window := agent.ContextWindow(a.Model); window > 0 {
+			if window := a.ContextWindow(); window > 0 {
 				pct = used * 100 / window
 				usedTokens = used
 			}
@@ -171,7 +171,11 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 		// small to reach 1% of the window (a huge-window model, or right
 		// after a mid-turn compaction) is still authoritative and must not
 		// be displaced by a larger stale persisted count.
-		if window := agent.ContextWindow(sess.Model); window > 0 {
+		window := agent.ContextWindow(sess.Model)
+		if cfg, err := config.LoadCached(); err == nil {
+			window = contextWindowForSession(cfg, sess)
+		}
+		if window > 0 {
 			pct = sess.LastContextTokens * 100 / window
 			usedTokens = sess.LastContextTokens
 		}
@@ -181,7 +185,11 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 		// never completed a turn with a real count): fall back to a transcript
 		// estimate. It carries no exact token count, so usedTokens stays 0 —
 		// the UI shows a bare arrow.
-		pct = estimateContextPct(sess)
+		window := agent.ContextWindow(sess.Model)
+		if cfg, err := config.LoadCached(); err == nil {
+			window = contextWindowForSession(cfg, sess)
+		}
+		pct = estimateContextPctForWindow(sess, window)
 	}
 	if pct <= 0 && usedTokens <= 0 {
 		return
@@ -213,7 +221,10 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 // schemas also ride along but the session doesn't record them; this stays a
 // (closer) lower bound.
 func estimateContextPct(sess *agent.Session) int {
-	window := agent.ContextWindow(sess.Model)
+	return estimateContextPctForWindow(sess, agent.ContextWindow(sess.Model))
+}
+
+func estimateContextPctForWindow(sess *agent.Session, window int) int {
 	if window <= 0 {
 		return 0
 	}
@@ -1577,7 +1588,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			sw.userError(perr)
 			return
 		}
-		toolDefs = tools.DefaultToolsForCtx(runCtx, a.Model)
+		toolDefs = tools.DefaultToolsForCtx(runCtx, a.Model, a.ContextWindow())
 		// Surface background-process completions (badge + chat notice).
 		s.wireBackgroundTaskNotices(sess.ID)
 	}

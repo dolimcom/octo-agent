@@ -44,6 +44,9 @@ import (
 type ModelEntry struct {
 	Provider string `yaml:"provider,omitempty"`
 	Model    string `yaml:"model,omitempty"`
+	// ContextWindow is the actual deployment limit for this endpoint/model
+	// pair, in tokens. Zero leaves resolution to the built-in model table.
+	ContextWindow int `yaml:"context_window,omitempty"`
 	// Protocol ("anthropic" | "openai") is the wire format for the Custom
 	// vendor, which has no registry-pinned protocol. Ignored for named vendors.
 	Protocol string `yaml:"protocol,omitempty"`
@@ -150,10 +153,23 @@ type Endpoint struct {
 type EndpointModel struct {
 	// Model is the model id sent to the API (e.g. claude-sonnet-4-6).
 	Model string `yaml:"model"`
+	// ContextWindow overrides the published model limit for this specific
+	// deployment. Values below the configured floor are ignored at runtime.
+	ContextWindow int `yaml:"context_window,omitempty"`
 	// Vision reports whether this model accepts image input. It is a
 	// model-level capability: the same endpoint may expose a vision model
 	// and a text-only model side by side.
 	Vision bool `yaml:"vision"`
+}
+
+// EffectiveContextWindow returns a usable per-model override. Hand-edited
+// invalid values are treated as absent so serve does not operate with a tiny
+// window when config.Load is used without an explicit Validate call.
+func (e ModelEntry) EffectiveContextWindow() int {
+	if e.ContextWindow < MinFallbackContextWindow {
+		return 0
+	}
+	return e.ContextWindow
 }
 
 // CompositeID returns the "<ID>::<Model>" reference for this endpoint+model.
@@ -636,13 +652,14 @@ func (c Config) DefaultEntry() ModelEntry {
 // ModelEntry from c.Models now read this projection from c.Endpoints.
 func projectToModelEntry(ep Endpoint, m EndpointModel) ModelEntry {
 	return ModelEntry{
-		Provider: ep.Provider,
-		Model:    m.Model,
-		BaseURL:  ep.BaseURL,
-		APIKey:   ep.APIKey,
-		Protocol: ep.Protocol,
-		Headers:  ep.Headers,
-		Vision:   m.Vision,
+		Provider:      ep.Provider,
+		Model:         m.Model,
+		ContextWindow: m.ContextWindow,
+		BaseURL:       ep.BaseURL,
+		APIKey:        ep.APIKey,
+		Protocol:      ep.Protocol,
+		Headers:       ep.Headers,
+		Vision:        m.Vision,
 
 		RPM:            ep.RPM,
 		MaxConcurrency: ep.MaxConcurrency,
@@ -780,6 +797,11 @@ func (c Config) Validate() []string {
 				problems = append(problems, fmt.Sprintf("duplicate model %q in endpoint %q", m.Model, ep.ID))
 			}
 			seenModel[m.Model] = true
+			if m.ContextWindow < 0 {
+				problems = append(problems, fmt.Sprintf("endpoint %q model %q has a negative context_window %d", ep.ID, m.Model, m.ContextWindow))
+			} else if m.ContextWindow > 0 && m.ContextWindow < MinFallbackContextWindow {
+				problems = append(problems, fmt.Sprintf("endpoint %q model %q context_window %d is below the %d-token floor — the value is in tokens, so 32k is 32000, not 32", ep.ID, m.Model, m.ContextWindow, MinFallbackContextWindow))
+			}
 		}
 
 		for k := range ep.Headers {
@@ -917,12 +939,28 @@ func (c Config) EntryByModel(model string) (ModelEntry, bool) {
 			return projectToModelEntry(defEp, defM), true
 		}
 	}
+	var first ModelEntry
+	firstEndpoint := ""
+	matches := 0
 	for _, ep := range c.Endpoints {
 		for _, m := range ep.Models {
 			if m.Model == model {
-				return projectToModelEntry(ep, m), true
+				if matches == 0 {
+					first = projectToModelEntry(ep, m)
+					firstEndpoint = ep.ID
+				}
+				matches++
 			}
 		}
+	}
+	if matches > 1 {
+		slog.Warn("config: model reference matches multiple endpoints, using the first match",
+			"model", model,
+			"picked_endpoint", firstEndpoint,
+			"hint", fmt.Sprintf("use <endpoint>::%s to disambiguate", model))
+	}
+	if matches > 0 {
+		return first, true
 	}
 	return ModelEntry{}, false
 }
@@ -1324,7 +1362,7 @@ func synthesizeEndpointsFromLegacy(entries []ModelEntry) []Endpoint {
 					"dropped_key_len", len(e.APIKey),
 					"dropped_key_fp", keyFingerprint(e.APIKey))
 			}
-			ep.Models = append(ep.Models, EndpointModel{Model: e.Model, Vision: e.Vision})
+			ep.Models = append(ep.Models, EndpointModel{Model: e.Model, ContextWindow: e.ContextWindow, Vision: e.Vision})
 		}
 		endpoints = append(endpoints, ep)
 	}

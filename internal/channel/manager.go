@@ -217,6 +217,9 @@ type ModelResolution struct {
 	Sender     agent.Sender
 	Model      string
 	BoundEntry string
+	// ContextWindow is the selected endpoint model's override. It travels with
+	// /model resolution because the bare model name cannot identify a deployment.
+	ContextWindow int
 }
 
 // ModelOps gives the IM /model command access to the server's model table and
@@ -416,7 +419,7 @@ func (m *Manager) cmdModel(ev InboundEvent, arg string, agentID string) string {
 		return fmt.Sprintf("⚠️ %v", err)
 	}
 	sess.Agent.SetSender(res.Sender)
-	sess.Agent.Model = res.Model
+	sess.Agent.SetModelConfig(res.Model, res.ContextWindow)
 	sess.AppliedModelConfig = res.BoundEntry
 	if st := sess.Store; st != nil {
 		if err := st.SetModelConfig(res.BoundEntry, res.Model); err != nil {

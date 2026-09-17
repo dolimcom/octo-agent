@@ -730,7 +730,9 @@ func tokenizeCommand(s string) []string {
 func DefaultTools() []agent.ToolDefinition { return DefaultToolsFor("") }
 
 // DefaultToolsFor returns the slice of ToolDefinitions sent to the LLM when
-// `--tools` is on, for the given model. Order matches allTools. Each
+// `--tools` is on, for the given model. An optional contextWindow is the
+// endpoint-resolved deployment limit used by Tool Search's auto threshold;
+// omitting it preserves the bare-model lookup. Order matches allTools. Each
 // capability-gated tool is withheld unless the corresponding registration call
 // has been made — SkillTool needs SetSkills, sub-agent tools need a
 // SubAgentManager. Advertising a tool that can only error wastes a slot and
@@ -749,8 +751,8 @@ func DefaultTools() []agent.ToolDefinition { return DefaultToolsFor("") }
 // small schemas instead of every MCP tool's schema every turn. The tool
 // names + one-line descriptions aren't lost — MCPManifestFor renders them
 // into the system prompt separately (see dev-docs/tool-search-mcp.md).
-func DefaultToolsFor(model string) []agent.ToolDefinition {
-	return defaultToolsFor(context.Background(), model)
+func DefaultToolsFor(model string, contextWindow ...int) []agent.ToolDefinition {
+	return defaultToolsFor(context.Background(), model, contextWindow...)
 }
 
 // DefaultToolsForCtx is DefaultToolsFor, but also advertises sub_agent* and
@@ -766,8 +768,8 @@ func DefaultToolsFor(model string) []agent.ToolDefinition {
 // When the context also carries a profile store (WithProfileStore) and session
 // agent ID (WithSessionAgentID), tools are filtered to the profile's allowlist
 // — see DefaultToolsForProfile.
-func DefaultToolsForCtx(ctx context.Context, model string) []agent.ToolDefinition {
-	return DefaultToolsForProfile(ctx, model)
+func DefaultToolsForCtx(ctx context.Context, model string, contextWindow ...int) []agent.ToolDefinition {
+	return DefaultToolsForProfile(ctx, model, contextWindow...)
 }
 
 // ctxKeySessionAgentID is the context key for the per-turn session AgentID.
@@ -798,8 +800,8 @@ func sessionAgentIDFromContext(ctx context.Context) string {
 // Empty Tools means different things depending on the agent source:
 //   - builtin (default, explore, general, code-review): empty = all tools
 //   - user-created: empty = no tools (explicitly restricted)
-func DefaultToolsForProfile(ctx context.Context, model string) []agent.ToolDefinition {
-	all := defaultToolsFor(ctx, model)
+func DefaultToolsForProfile(ctx context.Context, model string, contextWindow ...int) []agent.ToolDefinition {
+	all := defaultToolsFor(ctx, model, contextWindow...)
 	store := profileStoreFromContext(ctx)
 	agentID := sessionAgentIDFromContext(ctx)
 	if store == nil || agentID == "" {
@@ -838,7 +840,7 @@ func KnownToolNames() []string {
 	return names
 }
 
-func defaultToolsFor(ctx context.Context, model string) []agent.ToolDefinition {
+func defaultToolsFor(ctx context.Context, model string, contextWindow ...int) []agent.ToolDefinition {
 	skillsOn := skillsEnabled()
 	mgrOn := subAgentManagerEnabled()
 	askerOn := askerEnabled()
@@ -946,7 +948,7 @@ func defaultToolsFor(ctx context.Context, model string) []agent.ToolDefinition {
 	// tool/resource/prompt) when uploaded in full; collapsed to the two
 	// bridge tools when Tool Search is active for this model.
 	mcpDefs := mcpCatalog()
-	if toolSearchActive(model, mcpDefs) {
+	if toolSearchActive(model, mcpDefs, contextWindow...) {
 		defs = append(defs, toolSearchBridgeDefs()...)
 	} else {
 		defs = append(defs, mcpDefs...)

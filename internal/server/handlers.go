@@ -199,6 +199,23 @@ func entryForSession(cfg config.Config, sess *agent.Session) config.ModelEntry {
 	return cfg.DefaultEntry()
 }
 
+// contextWindowForSession keeps cold-session UI reads bound to the same
+// endpoint/model pair as live turns. A bare model name is insufficient when
+// multiple endpoints expose it with different deployed limits.
+func contextWindowForSession(cfg config.Config, sess *agent.Session) int {
+	entry := entryForSession(cfg, sess)
+	model := entry.Model
+	if sess != nil && sess.Model != "" {
+		model = sess.Model
+	}
+	if entry.Model == model {
+		if window := entry.EffectiveContextWindow(); window > 0 {
+			return window
+		}
+	}
+	return agent.ContextWindow(model)
+}
+
 // sessionStatusFields returns the server-level session metadata (permission
 // mode, reasoning effort, show reasoning, current context usage) plus the
 // DEFAULT working dir. PR5: reasoning effort and show_reasoning are global
@@ -213,7 +230,8 @@ func (srv *Server) sessionStatusFields(sess *agent.Session) (workingDir, permiss
 	} else {
 		permissionMode = string(resolvePermissionMode())
 	}
-	if cfg, err := config.Load(); err == nil {
+	cfg, cfgErr := config.Load()
+	if cfgErr == nil {
 		reasoningEffort = cfg.ReasoningEffort
 		if reasoningEffort == "" {
 			// Wire sentinel: "" is the stored form of off, but session_update
@@ -227,7 +245,11 @@ func (srv *Server) sessionStatusFields(sess *agent.Session) (workingDir, permiss
 	// count) so the list — and thus a page refresh — carries a correct value
 	// instead of 0. The live WS path still refines the active session per turn.
 	if sess != nil && sess.LastContextTokens > 0 {
-		if window := agent.ContextWindow(sess.Model); window > 0 {
+		window := agent.ContextWindow(sess.Model)
+		if cfgErr == nil {
+			window = contextWindowForSession(cfg, sess)
+		}
+		if window > 0 {
 			contextUsage = sess.LastContextTokens * 100 / window
 			if contextUsage > 100 {
 				contextUsage = 100
@@ -1163,7 +1185,7 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 	}
 	defer cleanup()
 
-	reply, err := a.Run(ctx, userInput, tools.DefaultToolsForCtx(ctx, a.Model), executor)
+	reply, err := a.Run(ctx, userInput, tools.DefaultToolsForCtx(ctx, a.Model, a.ContextWindow()), executor)
 	// Sync even on failure: an interrupt keeps the input + note, and rounds
 	// completed before a mid-turn error are billed work — the WS path
 	// persists both, so this transport must too (callers only Save on

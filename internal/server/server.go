@@ -49,8 +49,8 @@ import (
 )
 
 // getDefaultToolsFor bridges to tools.DefaultToolsFor for ws_handlers.go.
-func getDefaultToolsFor(model string) []agent.ToolDefinition {
-	return tools.DefaultToolsFor(model)
+func getDefaultToolsFor(model string, contextWindow ...int) []agent.ToolDefinition {
+	return tools.DefaultToolsFor(model, contextWindow...)
 }
 
 // Config holds server-level settings.
@@ -655,10 +655,14 @@ func (s *Server) enableSubAgentTools() {
 	}
 	cwd, envCtx := s.curCwdEnv()
 	cfg, _ := config.Load() // zero value on error still resolves correctly via EffectiveCoauthor
-	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(model, nil), memInjection, s.effectiveCoauthor(cfg), false)
+	entry := cfg.DefaultEntry()
+	if entry.Model == model {
+		template.SetModelConfig(model, entry.EffectiveContextWindow())
+	}
+	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(model, nil, template.ContextWindow()), memInjection, s.effectiveCoauthor(cfg), false)
 	executor := tools.NewDefaultRegistry()
 	spawner := app.NewSpawner(template, executor, func(ctx context.Context) []agent.ToolDefinition {
-		return tools.DefaultToolsForCtx(ctx, s.model)
+		return tools.DefaultToolsForCtx(ctx, template.Model, template.ContextWindow())
 	})
 	mgr := tools.NewSubAgentManager(spawner)
 	mgr.SetSynchronous(true)
@@ -1352,10 +1356,15 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// revert to for as long as the file stays broken.
 	cfg, cfgErr := config.LoadCached()
 	if cfgErr == nil {
+		entry := entryForSession(cfg, sess)
+		if entry.Model == model {
+			a.SetModelConfig(model, entry.EffectiveContextWindow())
+		}
 		// Images become text for a text-only model when a vision helper is
 		// configured. Nil (unconfigured) leaves every image path unchanged.
 		a.SetImageDescriber(app.NewVisionDescriber(a, cfg))
-		a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
+		liteSender, liteModel, liteContextWindow := s.liteSenderFromConfig(cfg)
+		a.SetLiteModel(liteSender, liteModel, liteContextWindow)
 		// Honor the configured auto-compaction threshold, the same way the CLI
 		// does (cmd/octo/chat.go). Without this the server left CompactAutoFraction
 		// at zero, so every web/desktop/IM turn fell back to the built-in 75%
@@ -1427,7 +1436,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 			base = profile.SystemPrompt
 			expertMode = true
 		}
-		a.System, a.LeanSystem = prompt.ComposePair(base, cwd, appendProjectEnvContext(envCtx, proj), s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode, sourceRuleDirs(cwd, proj)...)
+		a.System, a.LeanSystem = prompt.ComposePair(base, cwd, appendProjectEnvContext(envCtx, proj), s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model, profile, a.ContextWindow()), memInjection, s.effectiveCoauthor(cfg), expertMode, sourceRuleDirs(cwd, proj)...)
 		if err := sess.SetComposedSystem(a.System, a.LeanSystem, model, cwd, srcHash); err != nil {
 			slog.Warn("freeze composed system prompt", "session", sess.ID, "err", err)
 		}
@@ -1755,16 +1764,16 @@ func (s *Server) invalidateEndpointSenders(endpointID string) {
 // PR4 switches Save to emit endpoints: and cfg.Lite is populated on Load,
 // switch this arg to cfg.Lite so the lite sender participates in per-endpoint
 // invalidation (§9.2).
-func (s *Server) liteSenderFromConfig(cfg config.Config) (agent.Sender, string) {
+func (s *Server) liteSenderFromConfig(cfg config.Config) (agent.Sender, string, int) {
 	entry, ok := cfg.EntryByModel(cfg.Lite)
 	if !ok || entry.Model == "" {
-		return nil, ""
+		return nil, "", 0
 	}
 	sender, err := s.cachedSenderForEntry(cfg.Lite, entry)
 	if err != nil {
-		return nil, ""
+		return nil, "", 0
 	}
-	return sender, entry.Model
+	return sender, entry.Model, entry.EffectiveContextWindow()
 }
 
 // senderForEntry builds a sender from one config entry: env key first (same
@@ -2560,10 +2569,20 @@ func (s *Server) buildChannelAgent(profile *agentprofile.Profile) *agent.Agent {
 	a := agent.New(defaultSender, model)
 	a.MaxTokens = s.cfg.MaxTokens
 	if cfg, err := config.Load(); err == nil {
+		entry := cfg.DefaultEntry()
+		if profile.Model != "" {
+			if resolved, ok := cfg.EntryByModel(profile.Model); ok {
+				entry = resolved
+			}
+		}
+		if entry.Model == model {
+			a.SetModelConfig(model, entry.EffectiveContextWindow())
+		}
 		// IM attachments are a primary reason this feature exists — a channel
 		// agent needs the describer as much as a Web session does.
 		a.SetImageDescriber(app.NewVisionDescriber(a, cfg))
-		a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
+		liteSender, liteModel, liteContextWindow := s.liteSenderFromConfig(cfg)
+		a.SetLiteModel(liteSender, liteModel, liteContextWindow)
 	}
 	return a
 }
@@ -2682,16 +2701,21 @@ func (s *Server) channelModelOps() *channel.ModelOps {
 			return infos
 		},
 		Resolve: func(modelID string) (channel.ModelResolution, error) {
+			cfg, err := config.Load()
+			if err != nil {
+				return channel.ModelResolution{}, fmt.Errorf("loading config: %w", err)
+			}
 			if modelID == "default" {
 				sender, model := s.defaultSenderAndModel()
 				if model == "" {
 					return channel.ModelResolution{}, fmt.Errorf("no default model configured")
 				}
-				return channel.ModelResolution{Sender: sender, Model: model}, nil
-			}
-			cfg, err := config.Load()
-			if err != nil {
-				return channel.ModelResolution{}, fmt.Errorf("loading config: %w", err)
+				entry := cfg.DefaultEntry()
+				contextWindow := 0
+				if entry.Model == model {
+					contextWindow = entry.EffectiveContextWindow()
+				}
+				return channel.ModelResolution{Sender: sender, Model: model, ContextWindow: contextWindow}, nil
 			}
 			ep, m, perr := cfg.ParseModelFlag(modelID)
 			if perr != nil {
@@ -2703,7 +2727,7 @@ func (s *Server) channelModelOps() *channel.ModelOps {
 			if err != nil {
 				return channel.ModelResolution{}, err
 			}
-			return channel.ModelResolution{Sender: sender, Model: m.Model, BoundEntry: cid}, nil
+			return channel.ModelResolution{Sender: sender, Model: m.Model, BoundEntry: cid, ContextWindow: entry.EffectiveContextWindow()}, nil
 		},
 	}
 }
@@ -2734,7 +2758,7 @@ func (s *Server) applyChannelModel(sess *channel.Session) {
 				s.applyChannelDefault(sess, st)
 			} else {
 				sess.Agent.SetSender(sender)
-				sess.Agent.SetModel(entry.Model)
+				sess.Agent.SetModelConfig(entry.Model, entry.EffectiveContextWindow())
 				sess.AppliedModelConfig = entry.Model
 			}
 			return
@@ -2756,7 +2780,13 @@ func (s *Server) applyChannelModel(sess *channel.Session) {
 		return
 	}
 	if st.Model != "" {
-		sess.Agent.SetModel(st.Model)
+		contextWindow := 0
+		if cfg, err := config.LoadCached(); err == nil {
+			if entry, ok := cfg.EntryByModel(st.Model); ok && entry.Model == st.Model {
+				contextWindow = entry.EffectiveContextWindow()
+			}
+		}
+		sess.Agent.SetModelConfig(st.Model, contextWindow)
 	}
 }
 
@@ -2769,7 +2799,14 @@ func (s *Server) applyChannelDefault(sess *channel.Session, st *agent.Session) {
 		model = st.Model
 	}
 	sess.Agent.SetSender(sender)
-	sess.Agent.SetModel(model)
+	contextWindow := 0
+	if cfg, err := config.LoadCached(); err == nil {
+		entry := cfg.DefaultEntry()
+		if entry.Model == model {
+			contextWindow = entry.EffectiveContextWindow()
+		}
+	}
+	sess.Agent.SetModelConfig(model, contextWindow)
 	sess.AppliedModelConfig = ""
 }
 
@@ -3602,7 +3639,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 			base = profile.SystemPrompt
 			expertMode = true
 		}
-		sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, appendProjectEnvContext(envCtx, proj), s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode, sourceRuleDirs(cwd, proj)...)
+		sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, appendProjectEnvContext(envCtx, proj), s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model, profile, sess.Agent.ContextWindow()), memInjection, s.effectiveCoauthor(cfg), expertMode, sourceRuleDirs(cwd, proj)...)
 		if err := sess.Store.SetComposedSystem(sess.Agent.System, sess.Agent.LeanSystem, sess.Agent.Model, cwd, srcHash); err != nil {
 			slog.Warn("freeze composed system prompt", "session", string(sess.Key), "err", err)
 		}
@@ -3710,9 +3747,9 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		// this spawner's own toolsFn) correctly would.
 		spawner := app.NewSpawner(sess.Agent, executor, func(ctx context.Context) []agent.ToolDefinition {
 			if goalsOn {
-				return tools.DefaultToolsForCtx(ctx, sess.Agent.Model)
+				return tools.DefaultToolsForCtx(ctx, sess.Agent.Model, sess.Agent.ContextWindow())
 			}
-			return tools.WithoutGoalTools(tools.DefaultToolsForCtx(ctx, sess.Agent.Model))
+			return tools.WithoutGoalTools(tools.DefaultToolsForCtx(ctx, sess.Agent.Model, sess.Agent.ContextWindow()))
 		})
 		subMgr = tools.NewSubAgentManager(spawner)
 		// A background sub-agent finishes after this turn's chain ends; its
@@ -3728,7 +3765,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		})
 		ctx = tools.WithSubAgentManager(ctx, subMgr)
 
-		toolDefs = tools.DefaultToolsForCtx(ctx, sess.Agent.Model)
+		toolDefs = tools.DefaultToolsForCtx(ctx, sess.Agent.Model, sess.Agent.ContextWindow())
 		if !goalsOn {
 			// Advertising a tool this turn can't execute is the #597 class.
 			toolDefs = tools.WithoutGoalTools(toolDefs)
