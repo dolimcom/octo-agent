@@ -49,8 +49,8 @@ import (
 )
 
 // getDefaultToolsFor bridges to tools.DefaultToolsFor for ws_handlers.go.
-func getDefaultToolsFor(model string, contextWindow ...int) []agent.ToolDefinition {
-	return tools.DefaultToolsFor(model, contextWindow...)
+func getDefaultToolsFor(model string, contextWindow int) []agent.ToolDefinition {
+	return tools.DefaultToolsFor(model, contextWindow)
 }
 
 // Config holds server-level settings.
@@ -657,7 +657,7 @@ func (s *Server) enableSubAgentTools() {
 	cfg, _ := config.Load() // zero value on error still resolves correctly via EffectiveCoauthor
 	entry := cfg.DefaultEntry()
 	if entry.Model == model {
-		template.SetModelConfig(model, entry.EffectiveContextWindow())
+		template.SetModelDeployment(model, entry.EffectiveContextWindow(), entry.EndpointID)
 	}
 	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(model, nil, template.ContextWindow()), memInjection, s.effectiveCoauthor(cfg), false)
 	executor := tools.NewDefaultRegistry()
@@ -1358,13 +1358,13 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	if cfgErr == nil {
 		entry := entryForSession(cfg, sess)
 		if entry.Model == model {
-			a.SetModelConfig(model, entry.EffectiveContextWindow())
+			a.SetModelDeployment(model, entry.EffectiveContextWindow(), entry.EndpointID)
 		}
 		// Images become text for a text-only model when a vision helper is
 		// configured. Nil (unconfigured) leaves every image path unchanged.
 		a.SetImageDescriber(app.NewVisionDescriber(a, cfg))
-		liteSender, liteModel, liteContextWindow := s.liteSenderFromConfig(cfg)
-		a.SetLiteModel(liteSender, liteModel, liteContextWindow)
+		liteSender, liteModel, liteContextWindow, liteEndpointID := s.liteSenderFromConfig(cfg)
+		a.SetLiteModelDeployment(liteSender, liteModel, liteContextWindow, liteEndpointID)
 		// Honor the configured auto-compaction threshold, the same way the CLI
 		// does (cmd/octo/chat.go). Without this the server left CompactAutoFraction
 		// at zero, so every web/desktop/IM turn fell back to the built-in 75%
@@ -1764,16 +1764,16 @@ func (s *Server) invalidateEndpointSenders(endpointID string) {
 // PR4 switches Save to emit endpoints: and cfg.Lite is populated on Load,
 // switch this arg to cfg.Lite so the lite sender participates in per-endpoint
 // invalidation (§9.2).
-func (s *Server) liteSenderFromConfig(cfg config.Config) (agent.Sender, string, int) {
+func (s *Server) liteSenderFromConfig(cfg config.Config) (agent.Sender, string, int, string) {
 	entry, ok := cfg.EntryByModel(cfg.Lite)
 	if !ok || entry.Model == "" {
-		return nil, "", 0
+		return nil, "", 0, ""
 	}
 	sender, err := s.cachedSenderForEntry(cfg.Lite, entry)
 	if err != nil {
-		return nil, "", 0
+		return nil, "", 0, ""
 	}
-	return sender, entry.Model, entry.EffectiveContextWindow()
+	return sender, entry.Model, entry.EffectiveContextWindow(), entry.EndpointID
 }
 
 // senderForEntry builds a sender from one config entry: env key first (same
@@ -2576,13 +2576,13 @@ func (s *Server) buildChannelAgent(profile *agentprofile.Profile) *agent.Agent {
 			}
 		}
 		if entry.Model == model {
-			a.SetModelConfig(model, entry.EffectiveContextWindow())
+			a.SetModelDeployment(model, entry.EffectiveContextWindow(), entry.EndpointID)
 		}
 		// IM attachments are a primary reason this feature exists — a channel
 		// agent needs the describer as much as a Web session does.
 		a.SetImageDescriber(app.NewVisionDescriber(a, cfg))
-		liteSender, liteModel, liteContextWindow := s.liteSenderFromConfig(cfg)
-		a.SetLiteModel(liteSender, liteModel, liteContextWindow)
+		liteSender, liteModel, liteContextWindow, liteEndpointID := s.liteSenderFromConfig(cfg)
+		a.SetLiteModelDeployment(liteSender, liteModel, liteContextWindow, liteEndpointID)
 	}
 	return a
 }
@@ -2715,7 +2715,7 @@ func (s *Server) channelModelOps() *channel.ModelOps {
 				if entry.Model == model {
 					contextWindow = entry.EffectiveContextWindow()
 				}
-				return channel.ModelResolution{Sender: sender, Model: model, ContextWindow: contextWindow}, nil
+				return channel.ModelResolution{Sender: sender, Model: model, EndpointID: entry.EndpointID, ContextWindow: contextWindow}, nil
 			}
 			ep, m, perr := cfg.ParseModelFlag(modelID)
 			if perr != nil {
@@ -2727,7 +2727,7 @@ func (s *Server) channelModelOps() *channel.ModelOps {
 			if err != nil {
 				return channel.ModelResolution{}, err
 			}
-			return channel.ModelResolution{Sender: sender, Model: m.Model, BoundEntry: cid, ContextWindow: entry.EffectiveContextWindow()}, nil
+			return channel.ModelResolution{Sender: sender, Model: m.Model, BoundEntry: cid, EndpointID: ep.ID, ContextWindow: entry.EffectiveContextWindow()}, nil
 		},
 	}
 }
@@ -2758,7 +2758,7 @@ func (s *Server) applyChannelModel(sess *channel.Session) {
 				s.applyChannelDefault(sess, st)
 			} else {
 				sess.Agent.SetSender(sender)
-				sess.Agent.SetModelConfig(entry.Model, entry.EffectiveContextWindow())
+				sess.Agent.SetModelDeployment(entry.Model, entry.EffectiveContextWindow(), entry.EndpointID)
 				sess.AppliedModelConfig = entry.Model
 			}
 			return
@@ -2781,12 +2781,14 @@ func (s *Server) applyChannelModel(sess *channel.Session) {
 	}
 	if st.Model != "" {
 		contextWindow := 0
+		endpointID := ""
 		if cfg, err := config.LoadCached(); err == nil {
 			if entry, ok := cfg.EntryByModel(st.Model); ok && entry.Model == st.Model {
 				contextWindow = entry.EffectiveContextWindow()
+				endpointID = entry.EndpointID
 			}
 		}
-		sess.Agent.SetModelConfig(st.Model, contextWindow)
+		sess.Agent.SetModelDeployment(st.Model, contextWindow, endpointID)
 	}
 }
 
@@ -2800,13 +2802,15 @@ func (s *Server) applyChannelDefault(sess *channel.Session, st *agent.Session) {
 	}
 	sess.Agent.SetSender(sender)
 	contextWindow := 0
+	endpointID := ""
 	if cfg, err := config.LoadCached(); err == nil {
 		entry := cfg.DefaultEntry()
 		if entry.Model == model {
 			contextWindow = entry.EffectiveContextWindow()
+			endpointID = entry.EndpointID
 		}
 	}
-	sess.Agent.SetModelConfig(model, contextWindow)
+	sess.Agent.SetModelDeployment(model, contextWindow, endpointID)
 	sess.AppliedModelConfig = ""
 }
 

@@ -418,7 +418,7 @@ func TestPrepareToolTurn_AdvertisesSubAgentAndWorkflow(t *testing.T) {
 	}
 	defer cleanup()
 
-	names := toolNames(tools.DefaultToolsForCtx(turnCtx, a.Model))
+	names := toolNames(tools.DefaultToolsForCtx(turnCtx, a.Model, a.ContextWindow()))
 	if !slices.Contains(names, "sub_agent") {
 		t.Errorf("DefaultToolsForCtx missing sub_agent; got %v", names)
 	}

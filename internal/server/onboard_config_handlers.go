@@ -866,9 +866,11 @@ type createEndpointRequest struct {
 }
 
 type endpointModelIn struct {
-	Model         string `json:"model"`
-	ContextWindow int    `json:"context_window,omitempty"`
-	Vision        bool   `json:"vision"`
+	Model string `json:"model"`
+	// A pointer distinguishes an omitted field (preserve) from explicit zero
+	// (clear the deployment override and resume automatic window resolution).
+	ContextWindow *int `json:"context_window,omitempty"`
+	Vision        bool `json:"vision"`
 }
 
 type updateEndpointRequest struct {
@@ -950,10 +952,14 @@ func (s *Server) handleCreateEndpoint(w http.ResponseWriter, r *http.Request) {
 			if m.Model == "" {
 				continue
 			}
-			if m.ContextWindow < 0 || m.ContextWindow > 0 && m.ContextWindow < config.MinFallbackContextWindow {
+			if m.ContextWindow != nil && (*m.ContextWindow < 0 || *m.ContextWindow > 0 && *m.ContextWindow < config.MinFallbackContextWindow) {
 				return fmt.Errorf("model %q context_window must be 0 or at least %d tokens", m.Model, config.MinFallbackContextWindow)
 			}
-			ep.Models = append(ep.Models, config.EndpointModel{Model: m.Model, ContextWindow: m.ContextWindow, Vision: m.Vision})
+			contextWindow := 0
+			if m.ContextWindow != nil {
+				contextWindow = *m.ContextWindow
+			}
+			ep.Models = append(ep.Models, config.EndpointModel{Model: m.Model, ContextWindow: contextWindow, Vision: m.Vision})
 		}
 		cfg.UpsertEndpoint(ep)
 		created = ep
@@ -1142,14 +1148,33 @@ func (s *Server) handleAddEndpointModel(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "model is required")
 		return
 	}
-	if req.ContextWindow < 0 || req.ContextWindow > 0 && req.ContextWindow < config.MinFallbackContextWindow {
+	if req.ContextWindow != nil && (*req.ContextWindow < 0 || *req.ContextWindow > 0 && *req.ContextWindow < config.MinFallbackContextWindow) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("context_window must be 0 or at least %d tokens", config.MinFallbackContextWindow))
 		return
 	}
 
 	var updated config.Endpoint
 	if err := config.Mutate(func(cfg *config.Config) error {
-		if err := cfg.UpsertModel(id, config.EndpointModel{Model: req.Model, ContextWindow: req.ContextWindow, Vision: req.Vision}); err != nil {
+		contextWindow := 0
+		if req.ContextWindow != nil {
+			contextWindow = *req.ContextWindow
+		} else {
+			// Settings clients created before context_window existed omit the
+			// field, so an update must not erase a value set in config.yml.
+			for _, ep := range cfg.Endpoints {
+				if ep.ID != id {
+					continue
+				}
+				for _, model := range ep.Models {
+					if model.Model == req.Model {
+						contextWindow = model.ContextWindow
+						break
+					}
+				}
+				break
+			}
+		}
+		if err := cfg.UpsertModel(id, config.EndpointModel{Model: req.Model, ContextWindow: contextWindow, Vision: req.Vision}); err != nil {
 			return err
 		}
 		for _, ep := range cfg.Endpoints {

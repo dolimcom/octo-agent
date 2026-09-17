@@ -7,7 +7,7 @@ import (
 
 func advertisedNames() map[string]bool {
 	m := map[string]bool{}
-	for _, d := range DefaultToolsFor("") {
+	for _, d := range DefaultToolsFor("", 0) {
 		m[d.Name] = true
 	}
 	return m
@@ -65,7 +65,7 @@ func TestDefaultToolsForCtx_AdvertisesFromCtxScopedManager(t *testing.T) {
 	ctx := WithSubAgentManager(context.Background(), mgr)
 
 	names := map[string]bool{}
-	for _, d := range DefaultToolsForCtx(ctx, "") {
+	for _, d := range DefaultToolsForCtx(ctx, "", 0) {
 		names[d.Name] = true
 	}
 	if !names["sub_agent"] {
@@ -79,7 +79,7 @@ func TestDefaultToolsForCtx_AdvertisesFromCtxScopedManager(t *testing.T) {
 	// exactly like DefaultToolsFor — ctx-awareness must not leak into an
 	// unrelated ctx.
 	plainNames := map[string]bool{}
-	for _, d := range DefaultToolsForCtx(context.Background(), "") {
+	for _, d := range DefaultToolsForCtx(context.Background(), "", 0) {
 		plainNames[d.Name] = true
 	}
 	if plainNames["sub_agent"] || plainNames["workflow"] {
@@ -95,7 +95,7 @@ func TestDefaultToolsForCtx_NilSpawnerWithholdsWorkflow(t *testing.T) {
 	ctx := WithSubAgentManager(context.Background(), mgr)
 
 	names := map[string]bool{}
-	for _, d := range DefaultToolsForCtx(ctx, "") {
+	for _, d := range DefaultToolsForCtx(ctx, "", 0) {
 		names[d.Name] = true
 	}
 	if !names["sub_agent"] {
@@ -106,10 +106,10 @@ func TestDefaultToolsForCtx_NilSpawnerWithholdsWorkflow(t *testing.T) {
 	}
 }
 
-// DefaultToolsFor(model) must remain exactly DefaultToolsForCtx(background, model).
+// DefaultToolsFor(model, window) must remain exactly DefaultToolsForCtx(background, model, window).
 func TestDefaultToolsFor_MatchesCtxWithBackground(t *testing.T) {
-	got := DefaultToolsFor("some-model")
-	want := DefaultToolsForCtx(context.Background(), "some-model")
+	got := DefaultToolsFor("some-model", 0)
+	want := DefaultToolsForCtx(context.Background(), "some-model", 0)
 	if len(got) != len(want) {
 		t.Fatalf("DefaultToolsFor returned %d tools, DefaultToolsForCtx(background) returned %d", len(got), len(want))
 	}

@@ -2447,7 +2447,7 @@ func (s *Server) initWS() {
 // toolDefsFor returns tool definitions for the given model.
 func (s *Server) toolDefsFor(model string) []agent.ToolDefinition {
 	// Import cycle avoidance — tools.DefaultToolsFor is called from handlers.go
-	return getDefaultToolsFor(model)
+	return getDefaultToolsFor(model, 0)
 }
 
 // Interrupt cancellation tracking.

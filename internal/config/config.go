@@ -42,8 +42,11 @@ import (
 // ModelEntry is kept as a projection type: EntryByModel returns it, with fields
 // projected from (Endpoint, EndpointModel) — see projectToModelEntry.
 type ModelEntry struct {
-	Provider string `yaml:"provider,omitempty"`
-	Model    string `yaml:"model,omitempty"`
+	// EndpointID identifies the deployment this projected entry came from.
+	// It is runtime metadata, not part of either persisted config schema.
+	EndpointID string `yaml:"-" json:"-"`
+	Provider   string `yaml:"provider,omitempty"`
+	Model      string `yaml:"model,omitempty"`
 	// ContextWindow is the actual deployment limit for this endpoint/model
 	// pair, in tokens. Zero leaves resolution to the built-in model table.
 	ContextWindow int `yaml:"context_window,omitempty"`
@@ -652,6 +655,7 @@ func (c Config) DefaultEntry() ModelEntry {
 // ModelEntry from c.Models now read this projection from c.Endpoints.
 func projectToModelEntry(ep Endpoint, m EndpointModel) ModelEntry {
 	return ModelEntry{
+		EndpointID:    ep.ID,
 		Provider:      ep.Provider,
 		Model:         m.Model,
 		ContextWindow: m.ContextWindow,

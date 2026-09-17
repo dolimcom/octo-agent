@@ -72,20 +72,22 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 	// is trimmed via the lean system prompt (below) by default — but an
 	// explicit "lite" override (call parameter or frontmatter `model: lite`)
 	// opts the child onto the parent's lite sender/model.
-	sender, model := s.parent.GetSender(), req.Model
+	sender, parentModel, parentWindow, endpointID := s.parent.ModelDeployment()
+	model := req.Model
 	contextWindow := 0
 	if strings.EqualFold(model, "lite") {
 		model = "" // no lite configured: inherit the parent's model
-		if s.parent.LiteSender != nil && s.parent.LiteModel != "" {
-			sender, model = s.parent.LiteSender, s.parent.LiteModel
-			contextWindow = s.parent.LiteContextWindow()
+		liteSender, liteModel, liteWindow, liteEndpointID := s.parent.LiteModelConfig()
+		if liteSender != nil && liteModel != "" {
+			sender, model = liteSender, liteModel
+			contextWindow, endpointID = liteWindow, liteEndpointID
 		}
 	}
 	if model == "" {
-		model = s.parent.Model
+		model, contextWindow = parentModel, parentWindow
 	}
 	if contextWindow == 0 {
-		contextWindow = s.parent.ContextWindowFor(model)
+		contextWindow = s.contextWindowForEndpointModel(endpointID, model)
 	}
 
 	// Lean presets are seeded with the lean system prompt (skills + memory
@@ -96,7 +98,7 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 	}
 
 	child := agent.New(sender, model)
-	child.SetModelConfig(model, contextWindow)
+	child.SetModelDeployment(model, contextWindow, endpointID)
 	child.System = baseSystem
 	// Preset agents append a persona after the shared identity, so the child
 	// keeps the harness context but takes on its specialized role. A schema
@@ -112,7 +114,8 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 	child.Gate = s.parent.Gate
 	child.MaxTurns = childMaxTurns
 	// Children compact on the same lite model as the parent.
-	child.SetLiteModel(s.parent.LiteSender, s.parent.LiteModel, s.parent.LiteContextWindow())
+	liteSender, liteModel, liteWindow, liteEndpointID := s.parent.LiteModelConfig()
+	child.SetLiteModelDeployment(liteSender, liteModel, liteWindow, liteEndpointID)
 
 	// A child gets its own describer rather than the parent's: the two may run
 	// different models, and the describer decides whether to translate images
@@ -212,6 +215,25 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 		Turns:        turns,
 		StopReason:   stop,
 	}, nil
+}
+
+// contextWindowForEndpointModel resolves explicit child model overrides on the
+// endpoint already serving the parent. This avoids a bare-model lookup choosing
+// a different deployment when several endpoints expose the same model name.
+func (s *Spawner) contextWindowForEndpointModel(endpointID, model string) int {
+	if endpointID != "" {
+		if cfg, err := config.LoadCached(); err == nil {
+			if entry, ok := cfg.EntryByModel(endpointID + "::" + model); ok {
+				if window := entry.EffectiveContextWindow(); window > 0 {
+					return window
+				}
+				return agent.ContextWindow(model)
+			}
+		}
+	}
+	// Unbound and stale endpoint references retain the pre-existing bare-model
+	// behavior instead of preventing a child from starting.
+	return s.parent.ContextWindowFor(model)
 }
 
 // schemaRetryPrompt re-prompts a child whose first reply wasn't valid JSON.

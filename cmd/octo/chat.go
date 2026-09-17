@@ -917,7 +917,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// route every turn — and every tool-loop iteration — of this conversation
 	// to the same prompt cache.
 	a := agent.New(llmSender, resolvedModel)
-	a.SetModelConfig(resolvedModel, entry.EffectiveContextWindow())
+	a.SetModelDeployment(resolvedModel, entry.EffectiveContextWindow(), entry.EndpointID)
 	a.CWD = cwd
 	a.MaxTokens = *maxTokens
 	a.MaxTokensEscalate = resolveMaxTokensEscalate(*maxTokensEscalate, provName)
@@ -936,7 +936,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// in charge — never fail startup over the lite entry.
 	if liteEntry, ok := cfg.EntryByModel(cfg.Lite); ok && liteEntry.Model != "" {
 		if liteSender, lerr := buildSender(liteEntry.Provider, liteEntry, io.Discard, senderTuning{}); lerr == nil {
-			a.SetLiteModel(liteSender, liteEntry.Model, liteEntry.EffectiveContextWindow())
+			a.SetLiteModelDeployment(liteSender, liteEntry.Model, liteEntry.EffectiveContextWindow(), liteEntry.EndpointID)
 		}
 	}
 	// Images become text for a text-only model when a vision helper is
@@ -1297,7 +1297,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			// MCP manifest against a.Model (may differ from resolvedModel — a
 			// saved session can override it above) so the Tool Search
 			// activation gate matches the model actually in use.
-			a.SetModelConfig(a.Model, entry.EffectiveContextWindow())
+			a.SetModelDeployment(a.Model, entry.EffectiveContextWindow(), entry.EndpointID)
 			a.System, a.LeanSystem = prompt.ComposePair(sess.System, cwd, env, skillsManifest, tools.MCPManifestFor(a.Model, agentProfile, a.ContextWindow()), memInjection, coauthor, agentProfile != nil && agentProfile.SystemPrompt != "")
 		} else {
 			sess = agent.NewSession(resolvedModel, *system)

@@ -29,7 +29,7 @@ func TestEnableSubAgentToolsAdvertises(t *testing.T) {
 	})
 
 	names := map[string]bool{}
-	for _, d := range tools.DefaultToolsFor("") {
+	for _, d := range tools.DefaultToolsFor("", 0) {
 		names[d.Name] = true
 	}
 	for _, want := range []string{"sub_agent", "task_create", "task_list"} {

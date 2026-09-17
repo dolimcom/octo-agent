@@ -49,7 +49,7 @@ func TestSendMessage_NoMessenger(t *testing.T) {
 		t.Fatal("want error with no messenger registered")
 	}
 	// And the tool must not be advertised.
-	for _, d := range DefaultToolsFor("") {
+	for _, d := range DefaultToolsFor("", 0) {
 		if d.Name == "send_message" {
 			t.Fatal("send_message must not be advertised without a messenger")
 		}
@@ -60,7 +60,7 @@ func TestSendMessage_AdvertisedWhenEnabled(t *testing.T) {
 	SetMessenger(&fakeMessenger{})
 	defer SetMessenger(nil)
 	var found bool
-	for _, d := range DefaultToolsFor("") {
+	for _, d := range DefaultToolsFor("", 0) {
 		if d.Name == "send_message" {
 			found = true
 		}

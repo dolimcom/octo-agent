@@ -12,7 +12,7 @@ import (
 
 func TestDefaultToolsForProfile_NoProfileReturnsAll(t *testing.T) {
 	ctx := context.Background()
-	all := DefaultToolsForProfile(ctx, "test-model")
+	all := DefaultToolsForProfile(ctx, "test-model", 0)
 	if len(all) == 0 {
 		t.Fatal("expected non-empty tool list")
 	}
@@ -38,7 +38,7 @@ func TestDefaultToolsForProfile_FiltersByAllowlist(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := WithSessionAgentID(WithProfileStore(context.Background(), store), "restricted")
-	filtered := DefaultToolsForProfile(ctx, "test-model")
+	filtered := DefaultToolsForProfile(ctx, "test-model", 0)
 	// Don't assert exact count — defaultToolsFor gates tools on process-global
 	// flags, which test order can affect. Verify presence instead.
 	haveReadFile, haveGrep := false, false
@@ -74,7 +74,7 @@ func TestDefaultToolsForProfile_BuiltinEmptyReturnsAll(t *testing.T) {
 				t.Fatalf("%q source = %s, want builtin", id, p.Source)
 			}
 			ctx := WithSessionAgentID(WithProfileStore(context.Background(), store), id)
-			all := DefaultToolsForProfile(ctx, "test-model")
+			all := DefaultToolsForProfile(ctx, "test-model", 0)
 			if len(all) < 5 {
 				t.Fatalf("expected several tools for builtin %q with empty allowlist, got %d", id, len(all))
 			}
@@ -96,7 +96,7 @@ func TestDefaultToolsForProfile_ExpertEmptyReturnsNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := WithSessionAgentID(WithProfileStore(context.Background(), store), "expert-no-tools")
-	filtered := DefaultToolsForProfile(ctx, "test-model")
+	filtered := DefaultToolsForProfile(ctx, "test-model", 0)
 	if len(filtered) != 0 {
 		t.Fatalf("expected zero tools for expert agent with empty allowlist, got %d: %v", len(filtered), toolNames(filtered))
 	}
@@ -107,7 +107,7 @@ func TestDefaultToolsForProfile_UnknownAgentFallsBack(t *testing.T) {
 	store := agentprofile.New(dir)
 	// No profile for "ghost" → store.Get misses → all tools.
 	ctx := WithSessionAgentID(WithProfileStore(context.Background(), store), "ghost")
-	all := DefaultToolsForProfile(ctx, "test-model")
+	all := DefaultToolsForProfile(ctx, "test-model", 0)
 	if len(all) < 5 {
 		t.Fatalf("expected all tools for unknown agent, got %d", len(all))
 	}
@@ -128,7 +128,7 @@ func TestDefaultToolsForProfile_SubToolsFiltered(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := WithSessionAgentID(WithProfileStore(context.Background(), store), "no-sub")
-	filtered := DefaultToolsForProfile(ctx, "test-model")
+	filtered := DefaultToolsForProfile(ctx, "test-model", 0)
 	for _, d := range filtered {
 		if d.Name == "sub_agent" || d.Name == "sub_agent_status" {
 			t.Errorf("sub-agent tool %q should be filtered out", d.Name)

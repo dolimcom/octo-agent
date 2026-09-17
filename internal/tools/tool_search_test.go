@@ -84,21 +84,21 @@ func TestToolSearchActive_Modes(t *testing.T) {
 	cat := sampleCatalog()
 
 	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOff})
-	if toolSearchActive("claude-opus-4-8", cat) {
+	if toolSearchActive("claude-opus-4-8", cat, 0) {
 		t.Error("off mode must never activate")
 	}
 
 	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOn})
-	if !toolSearchActive("claude-opus-4-8", cat) {
+	if !toolSearchActive("claude-opus-4-8", cat, 0) {
 		t.Error("on mode must activate when MCP tools present")
 	}
-	if toolSearchActive("claude-opus-4-8", nil) {
+	if toolSearchActive("claude-opus-4-8", nil, 0) {
 		t.Error("on mode must not activate with an empty catalog")
 	}
 
 	// auto with an empty model never activates (back-compat for DefaultTools()).
 	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchAuto, ThresholdPct: 10})
-	if toolSearchActive("", cat) {
+	if toolSearchActive("", cat, 0) {
 		t.Error("auto with empty model must not activate")
 	}
 }
@@ -107,7 +107,7 @@ func TestToolSearchActive_AutoThreshold(t *testing.T) {
 	resetToolSearchConfig(t)
 	// A tiny catalog is well under 10% of a 1M-token window → no activation.
 	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchAuto, ThresholdPct: 10})
-	if toolSearchActive("claude-opus-4-8", sampleCatalog()) {
+	if toolSearchActive("claude-opus-4-8", sampleCatalog(), 0) {
 		t.Error("small catalog should stay under the auto threshold for a 1M window")
 	}
 	// A 0% threshold means any non-empty catalog crosses it.
@@ -120,7 +120,7 @@ func TestToolSearchActive_AutoThreshold(t *testing.T) {
 			Parameters:  map[string]any{"type": "object", "properties": map[string]any{"a": map[string]any{"type": "string"}}},
 		})
 	}
-	if !toolSearchActive("claude-haiku-4-5", big) {
+	if !toolSearchActive("claude-haiku-4-5", big, 0) {
 		t.Error("a large catalog should cross the auto threshold")
 	}
 }
@@ -135,7 +135,7 @@ func TestToolSearchUsesPerModelContextWindow(t *testing.T) {
 	}}
 	fakeCatalog(t, catalog)
 
-	if toolSearchActive("claude-sonnet-5", catalog) {
+	if toolSearchActive("claude-sonnet-5", catalog, 0) {
 		t.Fatal("built-in 1M window unexpectedly activated Tool Search")
 	}
 	if !toolSearchActive("claude-sonnet-5", catalog, 32_000) {
@@ -161,7 +161,7 @@ func TestDefaultToolsFor_BridgeReplacesCatalog(t *testing.T) {
 	fakeCatalog(t, sampleCatalog())
 	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOn})
 
-	defs := DefaultToolsFor("claude-opus-4-8")
+	defs := DefaultToolsFor("claude-opus-4-8", 0)
 	names := map[string]bool{}
 	for _, d := range defs {
 		names[d.Name] = true
@@ -182,7 +182,7 @@ func TestDefaultToolsFor_OffUploadsFullCatalog(t *testing.T) {
 	fakeCatalog(t, sampleCatalog())
 	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOff})
 
-	defs := DefaultToolsFor("claude-opus-4-8")
+	defs := DefaultToolsFor("claude-opus-4-8", 0)
 	names := map[string]bool{}
 	for _, d := range defs {
 		names[d.Name] = true
@@ -200,7 +200,7 @@ func TestMCPManifestFor_ActiveListsNamesNotSchema(t *testing.T) {
 	fakeCatalog(t, sampleCatalog())
 	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOn})
 
-	manifest := MCPManifestFor("claude-opus-4-8", nil)
+	manifest := MCPManifestFor("claude-opus-4-8", nil, 0)
 	for _, want := range []string{"mcp__github__create_issue", "mcp__github__list_pulls", "mcp__slack__post_message", "# Available MCP tools"} {
 		if !strings.Contains(manifest, want) {
 			t.Errorf("manifest missing %q:\n%s", want, manifest)
@@ -217,7 +217,7 @@ func TestMCPManifestFor_InactiveReturnsEmpty(t *testing.T) {
 	fakeCatalog(t, sampleCatalog())
 	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOff})
 
-	if got := MCPManifestFor("claude-opus-4-8", nil); got != "" {
+	if got := MCPManifestFor("claude-opus-4-8", nil, 0); got != "" {
 		t.Errorf("bridge inactive should yield no manifest, got:\n%s", got)
 	}
 }
@@ -227,7 +227,7 @@ func TestMCPManifestFor_EmptyCatalogReturnsEmpty(t *testing.T) {
 	fakeCatalog(t, nil)
 	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOn})
 
-	if got := MCPManifestFor("claude-opus-4-8", nil); got != "" {
+	if got := MCPManifestFor("claude-opus-4-8", nil, 0); got != "" {
 		t.Errorf("empty catalog should yield no manifest, got:\n%s", got)
 	}
 }
@@ -248,7 +248,7 @@ func TestMCPManifestFor_NoCap(t *testing.T) {
 	fakeCatalog(t, big)
 	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOn})
 
-	manifest := MCPManifestFor("claude-opus-4-8", nil)
+	manifest := MCPManifestFor("claude-opus-4-8", nil, 0)
 	got := strings.Count(manifest, "\n- mcp__srv__tool_")
 	if got != len(big) {
 		t.Errorf("manifest listed %d of %d tools, want all of them uncapped", got, len(big))
@@ -361,7 +361,7 @@ func TestMCPManifestFor_ExpertWithoutBridgeReturnsEmpty(t *testing.T) {
 			Tools: []string{"read_file", "grep"},
 		},
 	}
-	if got := MCPManifestFor("claude-opus-4-8", p); got != "" {
+	if got := MCPManifestFor("claude-opus-4-8", p, 0); got != "" {
 		t.Errorf("expert agent without MCP bridge tools must see no manifest, got:\n%s", got)
 	}
 }
@@ -378,7 +378,7 @@ func TestMCPManifestFor_ExpertWithBridgeReturnsManifest(t *testing.T) {
 			Tools: []string{"mcp_describe", "mcp_call"},
 		},
 	}
-	manifest := MCPManifestFor("claude-opus-4-8", p)
+	manifest := MCPManifestFor("claude-opus-4-8", p, 0)
 	if manifest == "" {
 		t.Error("expert agent with both MCP bridge tools must see the manifest")
 	}

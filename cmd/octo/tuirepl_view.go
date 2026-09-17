@@ -1290,7 +1290,7 @@ func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 	// which also set Agent.Model from the resolved entry. SetModel (not a
 	// bare write): the vision describer reads Model from the turn goroutine
 	// under the same lock.
-	m.a.SetModelConfig(entry.Model, entry.EffectiveContextWindow())
+	m.a.SetModelDeployment(entry.Model, entry.EffectiveContextWindow(), entry.EndpointID)
 	m.cfg.modelName = entry.Model
 	// Persist the switch on the session so a later `octo -c` resume honors it —
 	// the session file otherwise keeps the model it was created with (SyncFrom

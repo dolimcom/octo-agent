@@ -161,7 +161,9 @@ endpoints:
         context_window: 32000
 ```
 
-Values below 1000 are rejected with a note about the units — `32k` is `32000`, not `32`.
+The configuration API rejects values from 1 to 999 with a note about the units — `32k` is
+`32000`, not `32`. If you hand-edit `config.yml`, the runtime treats such a value as unset and
+`octo doctor` reports the unit mistake.
 
 For unrecognized models without a per-model value, you can set the global fallback instead:
 

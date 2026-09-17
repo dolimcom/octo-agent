@@ -89,13 +89,13 @@ func toolSearchConfig() ToolSearchConfig {
 }
 
 // toolSearchActive decides whether to replace the MCP defs with the bridge for
-// a given model. mcpDefs is the catalog that would otherwise be uploaded. An
-// optional contextWindow is the endpoint-resolved limit, which wins over the
+// a given model. mcpDefs is the catalog that would otherwise be uploaded.
+// contextWindow is the endpoint-resolved limit, which wins over the
 // bare-model table so identically named deployments get independent budgets.
 //
 // An empty model (the DefaultTools back-compat entry) never activates the
 // bridge, so callers that don't know the model keep the original behaviour.
-func toolSearchActive(model string, mcpDefs []agent.ToolDefinition, contextWindow ...int) bool {
+func toolSearchActive(model string, mcpDefs []agent.ToolDefinition, contextWindow int) bool {
 	if len(mcpDefs) == 0 {
 		return false
 	}
@@ -109,8 +109,8 @@ func toolSearchActive(model string, mcpDefs []agent.ToolDefinition, contextWindo
 			return false
 		}
 		window := agent.ContextWindow(model)
-		if len(contextWindow) > 0 && contextWindow[0] > 0 {
-			window = contextWindow[0]
+		if contextWindow > 0 {
+			window = contextWindow
 		}
 		budget := window * toolSearchConfig().ThresholdPct / 100
 		return estimateSchemaTokens(mcpDefs) >= budget
@@ -194,9 +194,9 @@ func toolSearchBridgeDefs() []agent.ToolDefinition {
 // lacks the MCP bridge tools (mcp_describe and mcp_call) — listing
 // tools the agent can't invoke is misleading. A nil profile means "default
 // agent, full access" and never suppresses the manifest.
-func MCPManifestFor(model string, profile *agentprofile.Profile, contextWindow ...int) string {
+func MCPManifestFor(model string, profile *agentprofile.Profile, contextWindow int) string {
 	catalog := mcpCatalog()
-	if !toolSearchActive(model, catalog, contextWindow...) {
+	if !toolSearchActive(model, catalog, contextWindow) {
 		return ""
 	}
 	if !hasMCPBridgeAccess(profile) {

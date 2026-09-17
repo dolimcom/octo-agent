@@ -125,7 +125,7 @@ func TestSendFileTool_SenderError(t *testing.T) {
 // (CLI/TUI), advertised with one (web + IM).
 func TestSendFileTool_DefaultToolsGating(t *testing.T) {
 	SetMessenger(nil)
-	for _, d := range DefaultToolsFor("") {
+	for _, d := range DefaultToolsFor("", 0) {
 		if d.Name == "send_file" {
 			t.Fatal("send_file must not be advertised without a messenger")
 		}
@@ -134,7 +134,7 @@ func TestSendFileTool_DefaultToolsGating(t *testing.T) {
 	SetMessenger(&fakeMessenger{})
 	defer SetMessenger(nil)
 	var found bool
-	for _, d := range DefaultToolsFor("") {
+	for _, d := range DefaultToolsFor("", 0) {
 		if d.Name == "send_file" {
 			found = true
 		}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
@@ -87,6 +88,54 @@ func TestAgentSpawner_RunsChildAndRollsTokensIntoParent(t *testing.T) {
 	}
 	if send.lastModel != "parent-model" {
 		t.Errorf("child model = %q, want parent's default", send.lastModel)
+	}
+}
+
+func TestAgentSpawner_ModelOverrideUsesParentsEndpointWindow(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cfg := config.Config{Endpoints: []config.Endpoint{
+		{
+			ID:       "endpoint-a",
+			Provider: "custom",
+			Models: []config.EndpointModel{
+				{Model: "parent-model", ContextWindow: 16_000},
+				{Model: "claude-sonnet-5", ContextWindow: 32_000},
+			},
+		},
+		{
+			ID:       "endpoint-b",
+			Provider: "custom",
+			Models:   []config.EndpointModel{{Model: "claude-sonnet-5", ContextWindow: 64_000}},
+		},
+	}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	send := &subAgentSender{reply: "ok"}
+	parent := agent.New(send, "parent-model")
+	parent.SetModelDeployment("parent-model", 16_000, "endpoint-a")
+	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
+
+	res, err := sp.Spawn(context.Background(), tools.SpawnRequest{
+		Description: "use sibling model",
+		Prompt:      "check the endpoint window",
+		Model:       "claude-sonnet-5",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, ok := sp.reg.get(res.AgentID)
+	if !ok {
+		t.Fatalf("spawned child %q not found", res.AgentID)
+	}
+	if got := child.agent.ContextWindow(); got != 32_000 {
+		t.Fatalf("child context window = %d, want endpoint-a override 32000", got)
+	}
+	if got := child.agent.ModelEndpointID(); got != "endpoint-a" {
+		t.Fatalf("child endpoint = %q, want endpoint-a", got)
 	}
 }
 

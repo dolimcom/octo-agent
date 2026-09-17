@@ -840,6 +840,71 @@ func TestEndpointModelContextWindowAPIRejectsUnitMistake(t *testing.T) {
 	}
 }
 
+func TestAddEndpointModelPreservesOmittedContextWindow(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{Endpoints: []config.Endpoint{{
+		ID:       "intranet",
+		Provider: "custom",
+		Models:   []config.EndpointModel{{Model: "Qwen3-32B", ContextWindow: 32_000, Vision: false}},
+	}}})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints/intranet/models", `{"model":"Qwen3-32B","vision":true}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("upsert without context_window = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := cfg.EntryByModel("intranet::Qwen3-32B")
+	if !ok || entry.ContextWindow != 32_000 || !entry.Vision {
+		t.Fatalf("saved entry = (%v, %+v), want preserved 32000 window and updated vision", ok, entry)
+	}
+}
+
+func TestAddEndpointModelExplicitZeroClearsContextWindow(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{Endpoints: []config.Endpoint{{
+		ID:       "intranet",
+		Provider: "custom",
+		Models:   []config.EndpointModel{{Model: "Qwen3-32B", ContextWindow: 32_000}},
+	}}})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints/intranet/models", `{"model":"Qwen3-32B","context_window":0,"vision":false}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("upsert with explicit zero = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := cfg.EntryByModel("intranet::Qwen3-32B")
+	if !ok || entry.ContextWindow != 0 {
+		t.Fatalf("saved entry = (%v, %+v), want cleared context window", ok, entry)
+	}
+}
+
+func TestAddEndpointModelOmittedContextWindowDefaultsToZero(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{Endpoints: []config.Endpoint{{ID: "intranet", Provider: "custom"}}})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints/intranet/models", `{"model":"new-model","vision":false}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("add without context_window = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := cfg.EntryByModel("intranet::new-model")
+	if !ok || entry.ContextWindow != 0 {
+		t.Fatalf("saved entry = (%v, %+v), want zero context window", ok, entry)
+	}
+}
+
 // TestCreateEndpoint_HeadersPersisted covers a create request that includes a
 // headers object — it must be persisted onto the new config.Endpoint and
 // echoed back both in the create response and a subsequent GET.
