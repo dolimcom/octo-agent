@@ -658,14 +658,10 @@ func (a *Agent) SetModel(model string) {
 	a.modelEndpointID = ""
 }
 
-// SetModelConfig atomically installs a model and its endpoint-resolved context
-// window. A zero window intentionally falls back to the built-in model table.
-func (a *Agent) SetModelConfig(model string, contextWindow int) {
-	a.SetModelDeployment(model, contextWindow, "")
-}
-
-// SetModelDeployment atomically installs the model and the endpoint deployment
-// that serves it. endpointID may be empty for raw, unbound model overrides.
+// SetModelDeployment atomically installs the model, its endpoint-resolved
+// context window, and the endpoint deployment that serves it. A zero window
+// intentionally falls back to the built-in model table; endpointID may be
+// empty for raw, unbound model overrides.
 func (a *Agent) SetModelDeployment(model string, contextWindow int, endpointID string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -674,14 +670,9 @@ func (a *Agent) SetModelDeployment(model string, contextWindow int, endpointID s
 	a.modelEndpointID = endpointID
 }
 
-// SetLiteModel installs the optional summarization sender together with its
-// own deployment window, which may differ from the primary model's window.
-func (a *Agent) SetLiteModel(sender Sender, model string, contextWindow int) {
-	a.SetLiteModelDeployment(sender, model, contextWindow, "")
-}
-
-// SetLiteModelDeployment installs the optional summarization model together
-// with the endpoint deployment that serves it.
+// SetLiteModelDeployment installs the optional summarization sender together
+// with its own deployment window and endpoint, which may differ from the
+// primary model's.
 func (a *Agent) SetLiteModelDeployment(sender Sender, model string, contextWindow int, endpointID string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

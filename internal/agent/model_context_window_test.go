@@ -8,7 +8,7 @@ import (
 
 func TestPerModelContextWindowDrivesAgentBudgetsAndGauge(t *testing.T) {
 	a := New(&summarizeFake{}, "claude-sonnet-5")
-	a.SetModelConfig("claude-sonnet-5", 32_000)
+	a.SetModelDeployment("claude-sonnet-5", 32_000, "")
 
 	if got := a.ContextWindow(); got != 32_000 {
 		t.Fatalf("ContextWindow = %d, want 32000", got)
@@ -29,8 +29,8 @@ func TestSummarizeUsesLiteInstanceWindowForSameModelName(t *testing.T) {
 	primary := &modelRecordingFake{summary: "primary"}
 	lite := &msgCountRecordingFake{summary: "lite"}
 	a := New(primary, "claude-sonnet-5")
-	a.SetModelConfig("claude-sonnet-5", 64_000)
-	a.SetLiteModel(lite, "claude-sonnet-5", 32_000)
+	a.SetModelDeployment("claude-sonnet-5", 64_000, "")
+	a.SetLiteModelDeployment(lite, "claude-sonnet-5", 32_000, "")
 	msgs := []Message{
 		NewUserMessage(strings.Repeat("a", 30_000)),
 		NewAssistantMessage(strings.Repeat("b", 30_000)),
